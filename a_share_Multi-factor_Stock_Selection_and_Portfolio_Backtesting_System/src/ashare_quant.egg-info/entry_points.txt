@@ -1,0 +1,2 @@
+[console_scripts]
+ashareq = ashare_quant.cli:app
