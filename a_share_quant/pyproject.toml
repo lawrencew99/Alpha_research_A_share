@@ -17,8 +17,5 @@ dependencies = [
 [project.optional-dependencies]
 data = ["akshare"]
 
-[project.scripts]
-ashare-quant-demo = "ashare_quant.cli:main"
-
 [tool.setuptools.packages.find]
 where = ["src"]
