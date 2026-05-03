@@ -12,7 +12,7 @@ pip install -e ".[data]"
 python examples\run_hs300_demo.py --start 2021-01-01 --end 2024-12-31
 ```
 
-运行后会在 `outputs_hs300_real/` 下生成回测净值曲线、月度收益热力图、调仓权重和指标 CSV。
+运行后会在 `outputs_hs300_real/` 下生成回测净值曲线、基准对比、回撤图、月度收益热力图、调仓权重、交易日志、因子 IC、分层收益和指标 CSV。
 
 ## 工程结构
 
@@ -71,8 +71,9 @@ a_share_quant/
 3. 用 `clean_universe()` 过滤停牌、涨跌停和缺失样本。
 4. 用 `build_factor_panel()` 生成动量、反转、波动率、流动性、估值和质量因子。
 5. 用 `combine_factors()` 做 winsorize、z-score 和多因子打分。
-6. 用 `run_backtest()` 加入调仓频率、持仓上限、手续费和滑点约束，输出净值、持仓和绩效指标。
-7. 用 `write_report()` 输出指标表、净值曲线和月度收益热力图。
+6. 用 `run_backtest()` 加入调仓频率、T+1 执行、持仓上限、买卖非对称费用、滑点和基准约束，输出净值、持仓和绩效指标。
+7. 用 `factor_ic()`、`quantile_returns()` 和 `factor_correlation()` 检查因子 IC、Rank IC、分层收益和因子冗余。
+8. 用 `write_report()` 输出指标表、净值曲线、基准对比、回撤图和月度收益热力图。
 
 ## 沪深 300 股票池
 
@@ -91,6 +92,35 @@ python examples\fetch_hs300_universe.py
 python examples\run_hs300_demo.py --start 2021-01-01 --end 2024-12-31
 ```
 
+常用研究参数：
+
+```powershell
+python examples\run_hs300_demo.py `
+  --start 2021-01-01 `
+  --end 2024-12-31 `
+  --top-n 30 `
+  --weighting equal `
+  --execution-delay 1 `
+  --benchmark equal_weight `
+  --commission 0.0003 `
+  --stamp-tax 0.001 `
+  --slippage 0.0005
+```
+
+可选权重方式：
+
+- `equal`: 入选股票等权，并应用单票权重上限
+- `score`: 按正向因子分数加权
+- `inverse_volatility`: 按过去波动率倒数加权
+
+可选研究诊断输出：
+
+- `factor_ic.csv`: 单因子 Rank IC 时间序列
+- `factor_ic_summary.csv`: IC 均值、标准差、ICIR、胜率和 t 统计量
+- `score_quantile_returns.csv`: 合成分数分层收益和 Top-Bottom 收益
+- `factor_correlation.csv`: 因子相关性矩阵
+- `concentration.csv`: 持仓数量、Top 权重和 Herfindahl 集中度
+
 可先用小样本验证：
 
 ```powershell
@@ -108,3 +138,36 @@ python examples\run_hs300_demo.py --max-workers 1
 ```powershell
 pip install -e ".[data]"
 ```
+
+## 研究假设和边界
+
+### 数据字段契约
+
+AKShare 日线主流程稳定提供的是价量字段：
+
+- `date`, `ticker`
+- `open`, `high`, `low`, `close`
+- `volume`, `amount`
+- `adj_factor`, `adj_open`, `adj_high`, `adj_low`, `adj_close`
+- `is_suspended`, `is_limit_up`, `is_limit_down`
+
+`pb`、`roe`、`industry`、`market_cap` 属于可选增强字段。只有输入数据中存在这些字段时，估值、质量、行业中性和市值中性才会实际生效。默认 AKShare 日线回测主要是价量因子研究，不应被解读为已经完整覆盖基本面多因子。
+
+### 成交假设
+
+默认 `--execution-delay 1`，含义是用 T 日收盘后可得的信息生成调仓目标，并在下一根交易 bar 执行。回测仍是日频近似模型，不模拟逐笔成交、盘口冲击和真实挂单排队。
+
+交易成本默认包括：
+
+- 买入佣金：`--commission`
+- 卖出佣金：`--sell-commission`，未设置时等于买入佣金
+- 卖出印花税：`--stamp-tax`
+- 双边滑点：`--slippage`
+
+### 股票池偏差
+
+当前 `data/hs300_constituents.csv` 是沪深 300 成分股快照。用于历史回测时可能存在幸存者偏差，严格研究应接入历史调样日成分或 point-in-time 指数权重。当前结果适合策略原型验证和研究流程展示，不应直接作为实盘收益承诺。
+
+### 基准说明
+
+默认 `--benchmark equal_weight` 使用回测股票池内所有可用股票的等权收益作为基准。它不是官方沪深 300 全收益指数。若要做正式研究，应接入沪深 300 全收益指数或其他 point-in-time 基准序列。

@@ -1,5 +1,13 @@
 """A-share multi-factor research and backtesting toolkit."""
 
+from ashare_quant.analysis import (
+    exposure_summary,
+    factor_correlation,
+    factor_ic,
+    forward_returns,
+    quantile_returns,
+    summarize_ic,
+)
 from ashare_quant.backtest import BacktestResult, run_backtest
 from ashare_quant.config import BacktestConfig, FactorConfig
 from ashare_quant.data import (
@@ -25,14 +33,20 @@ __all__ = [
     "build_factor_panel",
     "clean_universe",
     "combine_factors",
+    "exposure_summary",
+    "factor_correlation",
+    "factor_ic",
     "fetch_hs300_constituents",
+    "forward_returns",
     "load_akshare_ashare_history",
     "load_akshare_ashare_history_with_skips",
     "load_hs300_constituents",
     "load_ohlcv_csv",
     "load_universe_csv",
     "normalize_ashare_ticker",
+    "quantile_returns",
     "run_backtest",
+    "summarize_ic",
     "write_hs300_constituents",
     "write_report",
 ]

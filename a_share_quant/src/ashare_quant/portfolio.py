@@ -40,6 +40,39 @@ def inverse_volatility_weight(
     return cap_and_renormalize(inv_vol / inv_vol.sum(), max_weight=max_weight)
 
 
+def apply_industry_cap(
+    weights: pd.Series,
+    industry: pd.Series | None,
+    max_industry_weight: float | None,
+    max_weight: float = 0.08,
+) -> pd.Series:
+    """Limit aggregate industry exposure and redistribute remaining capital."""
+
+    if industry is None or max_industry_weight is None or weights.empty:
+        return weights
+    aligned_industry = industry.reindex(weights.index).fillna("UNKNOWN")
+    capped = weights.copy()
+    for _ in range(20):
+        industry_weight = capped.groupby(aligned_industry).transform("sum")
+        over = industry_weight > max_industry_weight
+        if not over.any():
+            break
+        over_industries = aligned_industry.loc[over].drop_duplicates()
+        for industry_name in over_industries:
+            members = aligned_industry[aligned_industry == industry_name].index
+            current = capped.loc[members].sum()
+            if current > 0:
+                capped.loc[members] *= max_industry_weight / current
+        leftover = 1.0 - capped.sum()
+        under = ~aligned_industry.isin(over_industries)
+        if leftover <= 0 or not under.any() or capped.loc[under].sum() <= 0:
+            break
+        capped.loc[under] += leftover * capped.loc[under] / capped.loc[under].sum()
+        capped = cap_and_renormalize(capped, max_weight=max_weight)
+    total = capped.sum()
+    return capped / total if total > 0 else capped
+
+
 def cap_and_renormalize(weights: pd.Series, max_weight: float = 0.08) -> pd.Series:
     """Apply a single-name cap and redistribute leftover capital."""
 

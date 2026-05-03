@@ -34,10 +34,29 @@ class BacktestConfig:
     top_n: int | None = 30
     top_quantile: float | None = None
     max_weight: float = 0.08
+    weighting: str = "equal"
+    execution_delay: int = 1
     commission: float = 0.0003
+    sell_commission: float | None = None
+    stamp_tax: float = 0.001
     slippage: float = 0.0005
+    min_commission: float = 0.0
     price_field: str = "adj_close"
+    benchmark: str | None = None
     annualization: int = 252
+    min_amount: float | None = None
+    max_industry_weight: float | None = None
+    industry_field: str = "industry"
+    volatility_field: str = "volatility_20"
+
+    def buy_cost_rate(self) -> float:
+        return self.commission + self.slippage
+
+    def sell_cost_rate(self) -> float:
+        commission = self.commission if self.sell_commission is None else self.sell_commission
+        return commission + self.stamp_tax + self.slippage
 
     def trading_cost(self) -> float:
-        return self.commission + self.slippage
+        """Backward-compatible one-way average cost estimate."""
+
+        return 0.5 * (self.buy_cost_rate() + self.sell_cost_rate())
