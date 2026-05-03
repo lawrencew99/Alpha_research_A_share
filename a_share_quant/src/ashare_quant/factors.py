@@ -41,7 +41,11 @@ def combine_factors(factors: pd.DataFrame, config: FactorConfig | None = None) -
     """Create a composite multi-factor score after cleaning and neutralization."""
 
     config = config or FactorConfig()
-    factor_columns = [column for column in config.factor_weights if column in factors.columns]
+    factor_columns = [
+        column
+        for column in config.factor_weights
+        if column in factors.columns and abs(float(config.factor_weights[column])) > 1e-12
+    ]
     if not factor_columns:
         raise ValueError("no configured factor columns were found")
 

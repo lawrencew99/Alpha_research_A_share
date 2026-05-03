@@ -32,7 +32,12 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Optional ticker limit for smoke tests.")
     parser.add_argument("--max-workers", type=int, default=1, help="AKShare download workers; keep 1 for stability.")
     parser.add_argument("--output-dir", default="outputs_hs300_real", help="Directory for report files.")
-    parser.add_argument("--top-n", type=int, default=30, help="Number of names held at each rebalance.")
+    parser.add_argument(
+        "--rebalance",
+        default="ME",
+        help="Pandas resample rule for rebalance dates, e.g. ME (month-end), W-FRI (weekly Friday).",
+    )
+    parser.add_argument("--top-n", type=int, default=40, help="Number of names held at each rebalance.")
     parser.add_argument("--max-weight", type=float, default=0.08, help="Single-name max portfolio weight.")
     parser.add_argument(
         "--weighting",
@@ -78,6 +83,7 @@ def main() -> None:
         market,
         scores,
         BacktestConfig(
+            rebalance=args.rebalance,
             top_n=args.top_n,
             max_weight=args.max_weight,
             weighting=args.weighting,

@@ -47,6 +47,8 @@ def run_backtest(
         volatility_panel = returns.rolling(20).std()
     industry_panel = _context_panel(context, config.industry_field, prices.index, prices.columns)
     amount_panel = _context_panel(market, "amount", prices.index, prices.columns)
+    can_buy_panel = _context_panel(market, "can_buy", prices.index, prices.columns)
+    can_sell_panel = _context_panel(market, "can_sell", prices.index, prices.columns)
     benchmark_returns = _resolve_benchmark_returns(returns, config, benchmark_returns)
 
     current_weights = pd.Series(0.0, index=prices.columns)
@@ -62,15 +64,27 @@ def run_backtest(
         equity *= 1 + portfolio_return
 
         if date in rebalance_dates:
-            tradable = _tradable_mask(amount_panel.loc[date] if amount_panel is not None else None, config)
-            target = _select_and_weight(
+            buy_ok = (
+                can_buy_panel.loc[date].reindex(prices.columns).fillna(True)
+                if can_buy_panel is not None
+                else pd.Series(True, index=prices.columns)
+            )
+            sell_ok = (
+                can_sell_panel.loc[date].reindex(prices.columns).fillna(True)
+                if can_sell_panel is not None
+                else pd.Series(True, index=prices.columns)
+            )
+            amount_row = amount_panel.loc[date] if amount_panel is not None else None
+            selection_mask = _selection_mask(amount_row, config, buy_ok, current_weights)
+            target_raw = _select_and_weight(
                 score_panel.loc[date],
                 config,
                 volatility=volatility_panel.loc[date],
                 industry=industry_panel.loc[date] if industry_panel is not None else None,
-                tradable=tradable,
+                tradable=selection_mask,
             )
-            target = target.reindex(prices.columns).fillna(0)
+            target_raw = target_raw.reindex(prices.columns).fillna(0)
+            target = _apply_trade_constraints(target_raw, current_weights, buy_ok, sell_ok)
             execution_position = min(position + max(config.execution_delay, 0), len(prices.index) - 1)
             pending_trades[prices.index[execution_position]] = target
 
@@ -256,6 +270,47 @@ def _context_panel(
     if column not in frame.columns:
         return None
     return frame[column].unstack("ticker").reindex(index=index, columns=columns)
+
+
+def _selection_mask(
+    amount: pd.Series | None,
+    config: BacktestConfig,
+    buy_ok: pd.Series,
+    current_weights: pd.Series,
+) -> pd.Series | None:
+    """Eligible names for top-N scoring: can open/add unless already held."""
+
+    mask = (buy_ok.fillna(True)) | (current_weights.fillna(0) > 1e-12)
+    if amount is not None and config.min_amount is not None:
+        mask &= amount.reindex(mask.index).fillna(0) >= config.min_amount
+    return mask
+
+
+def _apply_trade_constraints(
+    desired: pd.Series,
+    current: pd.Series,
+    buy_ok: pd.Series,
+    sell_ok: pd.Series,
+) -> pd.Series:
+    """Respect limit-up (cannot buy) and limit-down (cannot sell); renormalize weights."""
+
+    desired = desired.reindex(current.index).fillna(0).astype(float).copy()
+    current = current.reindex(desired.index).fillna(0).astype(float)
+    buy_ok = buy_ok.reindex(desired.index).fillna(True)
+    sell_ok = sell_ok.reindex(desired.index).fillna(True)
+
+    for ticker in desired.index:
+        if desired[ticker] < current[ticker] - 1e-12 and not bool(sell_ok[ticker]):
+            desired[ticker] = current[ticker]
+        if desired[ticker] > current[ticker] + 1e-12 and not bool(buy_ok[ticker]):
+            desired[ticker] = current[ticker]
+
+    total = float(desired.sum())
+    if total > 1e-12:
+        desired = desired / total
+    else:
+        desired[:] = 0.0
+    return desired
 
 
 def _tradable_mask(amount: pd.Series | None, config: BacktestConfig) -> pd.Series | None:

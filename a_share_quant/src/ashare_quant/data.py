@@ -11,6 +11,73 @@ import pandas as pd
 REQUIRED_PRICE_COLUMNS = {"date", "ticker", "close"}
 
 
+def limit_pct_for_ticker(ticker: str) -> float:
+    """Return daily limit magnitude in percent points for the board (e.g. 10.0 for ±10%)."""
+
+    raw = str(ticker).strip().upper()
+    code = raw.split(".")[0]
+    suffix = raw.split(".")[-1] if "." in raw else ""
+
+    if suffix == "BJ" or code.startswith(("8", "4")):
+        return 30.0
+    if code.startswith(("300", "301")):
+        return 20.0
+    if code.startswith("688"):
+        return 20.0
+    return 10.0
+
+
+def refresh_trade_flags(frame: pd.DataFrame) -> pd.DataFrame:
+    """Recompute limit-up/down and can_buy/can_sell from price or pct_change (per-ticker board rules)."""
+
+    result = frame.copy()
+    idx_names: list | None = None
+    had_multiindex = isinstance(result.index, pd.MultiIndex) and result.index.nlevels >= 2
+    if had_multiindex:
+        idx_names = list(result.index.names)
+    if "ticker" not in result.columns:
+        result = result.reset_index()
+
+    tickers = result["ticker"].astype(str)
+    lim_pct = tickers.map(limit_pct_for_ticker)
+    threshold_pct = (lim_pct - 0.05).astype(float)
+
+    if "pct_change" in result.columns:
+        pc = pd.to_numeric(result["pct_change"], errors="coerce").fillna(0.0)
+        result["is_limit_up"] = pc >= threshold_pct
+        result["is_limit_down"] = pc <= -threshold_pct
+    elif "close" in result.columns:
+        ordered = result.sort_values(["ticker", "date"]) if "date" in result.columns else result
+        ret = ordered.groupby("ticker", group_keys=False)["close"].pct_change(fill_method=None)
+        thr_dec = ordered["ticker"].map(lambda t: limit_pct_for_ticker(t) / 100.0 - 0.001)
+        lu_series = ret.fillna(0.0) >= thr_dec
+        ld_series = ret.fillna(0.0) <= -thr_dec
+        result["is_limit_up"] = lu_series.reindex(result.index).fillna(False)
+        result["is_limit_down"] = ld_series.reindex(result.index).fillna(False)
+    else:
+        result["is_limit_up"] = False
+        result["is_limit_down"] = False
+
+    if "is_suspended" not in result.columns:
+        if "volume" in result.columns:
+            result["is_suspended"] = result["volume"].fillna(0).eq(0)
+        else:
+            result["is_suspended"] = False
+
+    sus = result["is_suspended"].fillna(False).astype(bool)
+    lu = result["is_limit_up"].fillna(False).astype(bool)
+    ld = result["is_limit_down"].fillna(False).astype(bool)
+    result["can_buy"] = ~(lu | sus)
+    result["can_sell"] = ~(ld | sus)
+
+    if had_multiindex and "date" in result.columns and "ticker" in result.columns:
+        result = result.set_index(["date", "ticker"]).sort_index()
+        if idx_names and len(idx_names) >= 2 and all(name is not None for name in idx_names):
+            result.index.set_names(idx_names, inplace=True)
+
+    return result
+
+
 def load_ohlcv_csv(path: str | Path) -> pd.DataFrame:
     """Load local A-share OHLCV data and return a date/ticker indexed panel."""
 
@@ -186,7 +253,8 @@ def _load_one_akshare_history(
     cache_file = cache_dir / f"{_safe_cache_key(ticker)}_{start}_{end}_{adjust or 'none'}.csv"
     if cache_file.exists():
         try:
-            return pd.read_csv(cache_file, parse_dates=["date"])
+            cached = pd.read_csv(cache_file, parse_dates=["date"])
+            return refresh_trade_flags(cached)
         except pd.errors.EmptyDataError:
             cache_file.unlink(missing_ok=True)
 
@@ -268,14 +336,7 @@ def _normalize_akshare_daily(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
     if "outstanding_share" in frame.columns:
         frame["market_cap"] = frame["outstanding_share"] * frame["close"]
     frame["is_suspended"] = frame["volume"].fillna(0).eq(0)
-    if "pct_change" in frame.columns:
-        frame["is_limit_up"] = frame["pct_change"].fillna(0) >= 9.5
-        frame["is_limit_down"] = frame["pct_change"].fillna(0) <= -9.5
-    else:
-        returns = frame["close"].pct_change()
-        frame["is_limit_up"] = returns.fillna(0) >= 0.095
-        frame["is_limit_down"] = returns.fillna(0) <= -0.095
-    return frame
+    return refresh_trade_flags(frame)
 
 
 def _to_akshare_symbol(ticker: str) -> str:
@@ -294,14 +355,17 @@ def _safe_cache_key(ticker: str) -> str:
 
 
 def clean_universe(frame: pd.DataFrame) -> pd.DataFrame:
-    """Filter observations unsuitable for a cross-sectional A-share backtest."""
+    """Filter observations unsuitable for a cross-sectional A-share backtest.
 
-    result = frame.copy()
+    Keeps limit-up/limit-down rows so daily returns are not lost; use ``can_buy`` /
+    ``can_sell`` in execution instead of dropping those bars.
+    """
+
+    result = refresh_trade_flags(frame)
     tradable = result["adj_close"].notna()
 
-    for flag in ["is_suspended", "is_limit_up", "is_limit_down"]:
-        if flag in result.columns:
-            tradable &= ~result[flag].fillna(False).astype(bool)
+    if "is_suspended" in result.columns:
+        tradable &= ~result["is_suspended"].fillna(False).astype(bool)
 
     for column in ["amount", "volume"]:
         if column in result.columns:

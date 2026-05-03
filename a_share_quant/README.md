@@ -63,12 +63,13 @@ a_share_quant/
 - `market_cap`: 总市值或流通市值
 - `pe`, `pb`, `roe`: 估值与质量指标
 - `is_suspended`, `is_limit_up`, `is_limit_down`: 停牌和涨跌停标记
+- `can_buy`, `can_sell`: 是否允许买入/卖出（涨停不可买、跌停不可卖；停牌均不可交易）；可由 `refresh_trade_flags()` 从行情重算
 
 ## 核心流程
 
 1. 用 `load_hs300_constituents()` 读取沪深 300 股票池。
 2. 用 `load_akshare_ashare_history()` 拉取或读取缓存中的真实日线行情。
-3. 用 `clean_universe()` 过滤停牌、涨跌停和缺失样本。
+3. 用 `clean_universe()` 过滤停牌与无成交样本；**保留**涨跌停日行情以免收益被截断，执行层用 `can_buy` / `can_sell`（由 `limit_pct_for_ticker` 按板块判断涨跌停）约束买卖。
 4. 用 `build_factor_panel()` 生成动量、反转、波动率、流动性、估值和质量因子。
 5. 用 `combine_factors()` 做 winsorize、z-score 和多因子打分。
 6. 用 `run_backtest()` 加入调仓频率、T+1 执行、持仓上限、买卖非对称费用、滑点和基准约束，输出净值、持仓和绩效指标。
@@ -98,7 +99,8 @@ python examples\run_hs300_demo.py --start 2021-01-01 --end 2024-12-31
 python examples\run_hs300_demo.py `
   --start 2021-01-01 `
   --end 2024-12-31 `
-  --top-n 30 `
+  --top-n 40 `
+  --rebalance ME `
   --weighting equal `
   --execution-delay 1 `
   --benchmark equal_weight `
@@ -157,6 +159,8 @@ AKShare 日线主流程稳定提供的是价量字段：
 
 默认 `--execution-delay 1`，含义是用 T 日收盘后可得的信息生成调仓目标，并在下一根交易 bar 执行。回测仍是日频近似模型，不模拟逐笔成交、盘口冲击和真实挂单排队。
 
+涨跌停与撮合：`run_backtest()` 在调仓日对不可买入标的不上调权重（加仓需满足 `can_buy`）；不可卖出标的暂不减仓（保留持仓权重直至可卖）。本地 CSV 缓存会用 `refresh_trade_flags()` 按代码前缀重算涨跌停（主板 ±10%、科创/创业板 ±20%、北交所 ±30%），避免旧缓存里「一律 ±10%」对创业板、科创板等造成的误判和收益丢失。
+
 交易成本默认包括：
 
 - 买入佣金：`--commission`
@@ -171,3 +175,7 @@ AKShare 日线主流程稳定提供的是价量字段：
 ### 基准说明
 
 默认 `--benchmark equal_weight` 使用回测股票池内所有可用股票的等权收益作为基准。它不是官方沪深 300 全收益指数。若要做正式研究，应接入沪深 300 全收益指数或其他 point-in-time 基准序列。
+
+### 默认因子权重（价量）
+
+未接入 `pb`/`roe` 时，合成 Score 仅使用价量因子。默认 `FactorConfig` 将 **反转权重设为 0**（与中期动量冲突时关闭）、**流动性为负**（偏拥挤因子时常反向）、波动率为负（偏好低波）。请仍以输出目录中的 `factor_ic_summary.csv` 为准微调权重。

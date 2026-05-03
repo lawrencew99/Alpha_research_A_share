@@ -1,0 +1,3 @@
+﻿date,open,high,low,close,volume,amount,turnover,outstanding_share,ticker,adj_factor,market_cap,is_suspended,is_limit_up,is_limit_down,can_buy,can_sell
+2024-12-30,9.91,12.38,9.03,9.21,613161688.0,6210293647.0,0.7308732530307728,838943942.0,001391.SZ,1.0,7726673705.820001,False,False,False,True,True
+2024-12-31,8.05,9.88,7.15,9.12,520630763.0,4252485152.0,0.6205787263435535,838943942.0,001391.SZ,1.0,7651168751.039999,False,False,False,True,True
