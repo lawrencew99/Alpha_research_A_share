@@ -372,3 +372,157 @@ def clean_universe(frame: pd.DataFrame) -> pd.DataFrame:
             tradable &= result[column].fillna(0) > 0
 
     return result.loc[tradable].copy()
+
+
+def normalize_benchmark_ticker(benchmark: str) -> str:
+    """Map common CSI 300 aliases to the synthetic ticker used in the panel."""
+
+    b = str(benchmark).strip().upper().replace("-", "")
+    if b in {"000300", "CSI300", "HS300"}:
+        return "000300.SH"
+    if b in {"SH000300", "000300.SH"}:
+        return "000300.SH"
+    return str(benchmark).strip()
+
+
+def load_akshare_index_history(
+    symbol: str,
+    out_ticker: str,
+    start: str,
+    end: str,
+    cache_dir: str | Path = "data/raw/akshare_index",
+) -> pd.DataFrame:
+    """Download index daily OHLCV via AKShare and return a ``(date, ticker)`` panel rowset."""
+
+    try:
+        import akshare as ak  # type: ignore
+    except ImportError as exc:
+        raise ImportError('AKShare is required for index history: pip install "ashare-quant[data]"') from exc
+
+    cache_path = Path(cache_dir)
+    cache_path.mkdir(parents=True, exist_ok=True)
+    safe_sym = str(symbol).replace(".", "_")
+    cache_file = cache_path / f"index_{safe_sym}_{start}_{end}.csv"
+
+    if cache_file.exists():
+        flat = pd.read_csv(cache_file, parse_dates=["date"])
+    else:
+        start_d = start.replace("-", "")
+        end_d = end.replace("-", "")
+        raw: pd.DataFrame | None = None
+        last_err: Exception | None = None
+        try:
+            raw = ak.index_zh_a_hist(symbol=str(symbol).zfill(6), period="daily", start_date=start_d, end_date=end_d)
+        except Exception as exc:  # pragma: no cover - network/schema
+            last_err = exc
+        if raw is None or raw.empty:
+            try:
+                sym = f"sh{str(symbol).zfill(6)}"
+                alt = ak.stock_zh_index_daily(symbol=sym)
+                if alt is not None and not alt.empty:
+                    alt = alt.copy()
+                    alt["date"] = pd.to_datetime(alt["date"])
+                    raw = alt.loc[(alt["date"] >= pd.Timestamp(start)) & (alt["date"] <= pd.Timestamp(end))]
+            except Exception as exc:  # pragma: no cover
+                last_err = exc
+        if raw is None or raw.empty:
+            raise RuntimeError(f"failed to load index {symbol}: {last_err}")
+        flat = _normalize_index_hist_raw(raw, out_ticker)
+        flat.to_csv(cache_file, index=False, encoding="utf-8-sig")
+
+    flat = refresh_trade_flags(flat)
+    panel = flat.set_index(["date", "ticker"]).sort_index()
+    return add_adjusted_prices(panel)
+
+
+def _normalize_index_hist_raw(raw: pd.DataFrame, out_ticker: str) -> pd.DataFrame:
+    rename_candidates = {
+        "日期": "date",
+        "date": "date",
+        "开盘": "open",
+        "收盘": "close",
+        "最高": "high",
+        "最低": "low",
+        "成交量": "volume",
+        "成交额": "amount",
+        "涨跌幅": "pct_change",
+    }
+    rename_map = {k: v for k, v in rename_candidates.items() if k in raw.columns}
+    frame = raw.rename(columns=rename_map).copy()
+    if "date" not in frame.columns:
+        frame["date"] = pd.to_datetime(raw.iloc[:, 0])
+
+    for column in ["open", "high", "low", "close"]:
+        if column not in frame.columns and "close" in frame.columns:
+            frame[column] = frame["close"]
+
+    if "volume" not in frame.columns:
+        frame["volume"] = 1e12
+    if "amount" not in frame.columns:
+        frame["amount"] = pd.to_numeric(frame["close"], errors="coerce") * pd.to_numeric(
+            frame["volume"], errors="coerce"
+        ).replace(0, 1)
+
+    frame["volume"] = pd.to_numeric(frame["volume"], errors="coerce").fillna(1e12).clip(lower=1.0)
+    frame["amount"] = pd.to_numeric(frame["amount"], errors="coerce").fillna(
+        pd.to_numeric(frame["close"], errors="coerce") * frame["volume"]
+    )
+
+    frame["date"] = pd.to_datetime(frame["date"])
+    frame["ticker"] = out_ticker
+    frame["adj_factor"] = 1.0
+    keep = ["date", "ticker", "open", "high", "low", "close", "volume", "amount"]
+    if "pct_change" in frame.columns:
+        keep.append("pct_change")
+    return frame[keep]
+
+
+def merge_benchmark_if_needed(
+    market: pd.DataFrame,
+    benchmark: str | None,
+    start: str,
+    end: str,
+    cache_dir: str | Path = "data/raw/akshare_index",
+) -> pd.DataFrame:
+    """Append a synthetic index ticker column when ``benchmark`` names an index not in ``market``."""
+
+    if benchmark is None:
+        return market
+    key = str(benchmark).strip().lower()
+    if key in {"", "none", "equal_weight", "universe_equal"}:
+        return market
+
+    target = normalize_benchmark_ticker(str(benchmark))
+    existing = market.index.get_level_values("ticker").unique()
+    if target in existing:
+        return market
+
+    code = target.split(".")[0].zfill(6)
+    idx_panel = load_akshare_index_history(
+        symbol=code,
+        out_ticker=target,
+        start=start,
+        end=end,
+        cache_dir=cache_dir,
+    )
+    return _concat_align_market_frames(market, idx_panel)
+
+
+def _concat_align_market_frames(stocks: pd.DataFrame, extra: pd.DataFrame) -> pd.DataFrame:
+    """Concatenate two panels with identical columns."""
+
+    extra = extra.copy()
+    for column in stocks.columns:
+        if column not in extra.columns:
+            if column == "turnover":
+                extra[column] = 0.0
+            elif column in {"outstanding_share", "market_cap"}:
+                extra[column] = float("nan")
+            elif column in {"is_suspended", "is_limit_up", "is_limit_down"}:
+                extra[column] = False
+            elif column in {"can_buy", "can_sell"}:
+                extra[column] = True
+            else:
+                extra[column] = float("nan")
+    extra = extra.reindex(columns=stocks.columns)
+    return pd.concat([stocks, extra]).sort_index()

@@ -65,14 +65,14 @@ def run_backtest(
 
         if date in rebalance_dates:
             buy_ok = (
-                can_buy_panel.loc[date].reindex(prices.columns).fillna(True)
+                can_buy_panel.loc[date].reindex(prices.columns).fillna(True).astype(bool)
                 if can_buy_panel is not None
-                else pd.Series(True, index=prices.columns)
+                else pd.Series(True, index=prices.columns, dtype=bool)
             )
             sell_ok = (
-                can_sell_panel.loc[date].reindex(prices.columns).fillna(True)
+                can_sell_panel.loc[date].reindex(prices.columns).fillna(True).astype(bool)
                 if can_sell_panel is not None
-                else pd.Series(True, index=prices.columns)
+                else pd.Series(True, index=prices.columns, dtype=bool)
             )
             amount_row = amount_panel.loc[date] if amount_panel is not None else None
             selection_mask = _selection_mask(amount_row, config, buy_ok, current_weights)

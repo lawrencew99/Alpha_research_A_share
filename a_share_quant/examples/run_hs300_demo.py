@@ -22,6 +22,7 @@ from ashare_quant import (
     summarize_ic,
     write_report,
 )
+from ashare_quant.data import merge_benchmark_if_needed, normalize_benchmark_ticker
 
 
 def main() -> None:
@@ -49,7 +50,10 @@ def main() -> None:
     parser.add_argument(
         "--benchmark",
         default="equal_weight",
-        help="Benchmark source: equal_weight, none, or a ticker present in the market panel.",
+        help=(
+            "Benchmark: equal_weight (universe equal-weight), none, "
+            "or index ticker merged via AKShare e.g. 000300 / 000300.SH for CSI 300."
+        ),
     )
     parser.add_argument("--commission", type=float, default=0.0003, help="Buy-side commission rate.")
     parser.add_argument("--sell-commission", type=float, default=None, help="Sell-side commission rate.")
@@ -66,7 +70,7 @@ def main() -> None:
     if args.limit is not None:
         tickers = tickers[: args.limit]
 
-    market, skipped = load_akshare_ashare_history_with_skips(
+    market_raw, skipped = load_akshare_ashare_history_with_skips(
         tickers=tickers,
         start=args.start,
         end=args.end,
@@ -74,13 +78,21 @@ def main() -> None:
         max_workers=args.max_workers,
         show_progress=True,
     )
-    market = clean_universe(market)
+    market_stocks = clean_universe(market_raw)
+    market_bt = merge_benchmark_if_needed(market_stocks, args.benchmark, args.start, args.end)
 
-    factors = build_factor_panel(market)
+    if args.benchmark.lower() == "none":
+        bench_cfg: str | None = None
+    elif args.benchmark.lower() in {"equal_weight", "universe_equal"}:
+        bench_cfg = args.benchmark.lower()
+    else:
+        bench_cfg = normalize_benchmark_ticker(args.benchmark)
+
+    factors = build_factor_panel(market_stocks)
     factor_config = FactorConfig(neutralize_industry=args.neutralize_industry, neutralize_size=args.neutralize_size)
     scores = combine_factors(factors, factor_config)
     result = run_backtest(
-        market,
+        market_bt,
         scores,
         BacktestConfig(
             rebalance=args.rebalance,
@@ -88,7 +100,7 @@ def main() -> None:
             max_weight=args.max_weight,
             weighting=args.weighting,
             execution_delay=args.execution_delay,
-            benchmark=None if args.benchmark.lower() == "none" else args.benchmark,
+            benchmark=bench_cfg,
             commission=args.commission,
             sell_commission=args.sell_commission,
             stamp_tax=args.stamp_tax,
@@ -101,7 +113,7 @@ def main() -> None:
     if not skipped.empty:
         skipped.to_csv(output_dir / "skipped_tickers.csv", index=False, encoding="utf-8-sig")
 
-    future = forward_returns(market, periods=args.forward_period)
+    future = forward_returns(market_stocks, periods=args.forward_period)
     ic = factor_ic(factors, future)
     if not ic.empty:
         ic.to_csv(output_dir / "factor_ic.csv", encoding="utf-8-sig")
@@ -110,14 +122,14 @@ def main() -> None:
     layered = quantile_returns(scores, future, quantiles=args.quantiles)
     if not layered.empty:
         layered.to_csv(output_dir / "score_quantile_returns.csv", encoding="utf-8-sig")
-    exposures = exposure_summary(result.weights, market)
+    exposures = exposure_summary(result.weights, market_stocks)
     for name, frame in exposures.items():
         frame.to_csv(output_dir / f"{name}.csv", encoding="utf-8-sig")
 
     print("=== CSI 300 real-data backtest ===")
     print("Data source: AKShare stock_zh_a_daily / stock_zh_a_hist")
     print(f"Universe size: {len(tickers)}")
-    print(f"Tickers with data: {market.index.get_level_values('ticker').nunique()}")
+    print(f"Tickers with data: {market_stocks.index.get_level_values('ticker').nunique()}")
     print(f"Skipped tickers: {len(skipped)}")
     print(f"Weighting: {args.weighting}")
     print(f"Execution delay: T+{args.execution_delay}")

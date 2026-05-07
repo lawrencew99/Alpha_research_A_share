@@ -13,14 +13,14 @@ class FactorConfig:
     winsor_quantile: float = 0.025
     neutralize_industry: bool = True
     neutralize_size: bool = True
-    # Price-volume defaults avoid momentum vs reversal conflict; liquidity often behaves as a crowding
-    # proxy on large-cap indices—negative prefers lower near-term turnover until IC proves otherwise.
+    # Defaults follow IC diagnostics (sample HS300 2021–2024): momentum IC≈0 → off; reversal IC>0 → on;
+    # volatility & liquidity strongly negative IC → keep negative weights.
     factor_weights: Mapping[str, float] = field(
         default_factory=lambda: {
-            "momentum_60": 0.45,
-            "reversal_20": 0.0,
-            "volatility_20": -0.35,
-            "liquidity_20": -0.20,
+            "momentum_60": 0.0,
+            "reversal_20": 0.30,
+            "volatility_20": -0.40,
+            "liquidity_20": -0.30,
             "value_pb": 0.0,
             "quality_roe": 0.0,
         }
