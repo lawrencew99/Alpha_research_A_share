@@ -27,3 +27,6 @@ v3.0 确认改完因子权重后的基线。做了四组对照实验，完成调
      更新 run_hs300_demo.py 文件以适配基准接入，同时优化因子配置，提升整体运行表现。
      调整 backtest.py 文件中的数据处理逻辑，增强类型安全性。
      
+v4.0 从机制上消除回测过拟合与多重检验偏差。
+     已实现整段 in-sample 选优改为 4 折嵌套滚动 walk-forward： walk_forward_folds(train_months=24, test_months=6, step_months=6)，每一折训练窗 24 个月、紧接着 6 个月测试窗、各折测试窗不重叠，然后把所有测试窗的日收益拼起来得到一条"OOS 净值"。
+    新增 research_pipeline / walk_forward / deflated_metrics，落 RESULTS_REPORT.md 与 10 项 pytest。
