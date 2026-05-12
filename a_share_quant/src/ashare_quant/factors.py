@@ -37,10 +37,33 @@ def build_factor_panel(frame: pd.DataFrame) -> pd.DataFrame:
     return result.join(frame[context_columns])
 
 
-def combine_factors(factors: pd.DataFrame, config: FactorConfig | None = None) -> pd.Series:
+def combine_factors(
+    factors: pd.DataFrame,
+    config: FactorConfig | None = None,
+    *,
+    ic_calibration_factors: pd.DataFrame | None = None,
+    ic_calibration_future: pd.Series | None = None,
+) -> pd.Series:
     """Create a composite multi-factor score after cleaning and neutralization."""
 
     config = config or FactorConfig()
+    if config.weights_source == "ic_train":
+        if ic_calibration_factors is None or ic_calibration_future is None:
+            raise ValueError("ic_train requires ic_calibration_factors and ic_calibration_future")
+        from ashare_quant.ic_weights import estimate_factor_weights_ic
+
+        weight_map = estimate_factor_weights_ic(ic_calibration_factors, ic_calibration_future)
+        fw = {k: float(v) for k, v in weight_map.items() if k in factors.columns and abs(float(v)) > 1e-12}
+        if not fw:
+            raise ValueError("IC weight estimation returned no usable factors")
+        config = FactorConfig(
+            winsor_quantile=config.winsor_quantile,
+            neutralize_industry=config.neutralize_industry,
+            neutralize_size=config.neutralize_size,
+            weights_source="manual",
+            factor_weights=fw,
+        )
+
     factor_columns = [
         column
         for column in config.factor_weights

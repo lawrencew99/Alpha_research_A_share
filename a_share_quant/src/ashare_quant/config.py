@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Literal, Mapping
+
+WeightsSource = Literal["manual", "ic_train"]
 
 
 @dataclass(frozen=True)
@@ -13,8 +15,9 @@ class FactorConfig:
     winsor_quantile: float = 0.025
     neutralize_industry: bool = True
     neutralize_size: bool = True
-    # Defaults follow IC diagnostics (sample HS300 2021–2024): momentum IC≈0 → off; reversal IC>0 → on;
-    # volatility & liquidity strongly negative IC → keep negative weights.
+    weights_source: WeightsSource = "manual"
+    # Default magnitudes are a manual prior; use ``weights_source='ic_train'`` with calibration slices
+    # in ``combine_factors`` for train-window ICIR weights (see README research flow).
     factor_weights: Mapping[str, float] = field(
         default_factory=lambda: {
             "momentum_60": 0.0,

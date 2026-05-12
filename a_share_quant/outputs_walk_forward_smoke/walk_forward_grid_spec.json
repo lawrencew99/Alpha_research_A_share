@@ -1,0 +1,27 @@
+{
+  "grid_mode": "default",
+  "grid": {
+    "top_n": [
+      20,
+      30,
+      40
+    ],
+    "weighting": [
+      "equal",
+      "score"
+    ]
+  },
+  "selection_metric": "information_ratio",
+  "train_months": 24,
+  "test_months": 6,
+  "step_months": 6,
+  "n_trials_for_deflated": 6,
+  "diag": {
+    "n_folds_evaluated": 4,
+    "n_folds_input": 4,
+    "grid_size": 6,
+    "selection_metric": "information_ratio",
+    "stitched_sharpe": 0.0627886227762748,
+    "stitched_annual_return": 0.014196371228785143
+  }
+}

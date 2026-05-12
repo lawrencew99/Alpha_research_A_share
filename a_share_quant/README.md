@@ -24,17 +24,29 @@ a_share_quant/
     hs300_constituents.csv
     raw/akshare_daily/
   examples/
+    aggregate_sensitivity.py
+    eval_selected_on_test.py
     fetch_hs300_universe.py
     run_hs300_demo.py
+    run_sensitivity_train_val.py
+    run_walk_forward_hs300.py
   src/ashare_quant/
     __init__.py
+    analysis.py
     backtest.py
     config.py
     data.py
+    deflated_metrics.py
     factors.py
+    ic_weights.py
     portfolio.py
     report.py
+    research_pipeline.py
+    sample_split.py
     universe.py
+    walk_forward.py
+  tests/
+    ...
 ```
 
 ## 数据来源
@@ -179,3 +191,50 @@ AKShare 日线主流程稳定提供的是价量字段：
 ### 默认因子权重（价量）
 
 未接入 `pb`/`roe` 时，合成 Score 仅使用价量因子。默认 `FactorConfig` 将 **反转权重设为 0**（与中期动量冲突时关闭）、**流动性为负**（偏拥挤因子时常反向）、波动率为负（偏好低波）。请仍以输出目录中的 `factor_ic_summary.csv` 为准微调权重。
+
+### 过拟合与样本外评估
+
+**主推荐流程：嵌套滚动 walk-forward（nested rolling walk-forward）。** 把历史按固定长度的滚动训练 / 测试窗切成多折，每个训练窗上**单独**跑一次超参网格，挑出 champion 后**只**应用于紧随其后的测试窗记账；所有测试窗日收益按时间拼接成一条样本外净值曲线，整体指标按 `|grid|` 做 Bonferroni 折扣。这样**因子 IC 权重每折重估、超参也每折重选**，没有任何一段测试数据曾被用来选参，结构性地避免了「同一段历史既调参又报告」的 selection bias 与多重检验问题。
+
+- **核心 API**：`run_nested_walk_forward_oos(market_bt, factors_full, base_spec, folds, grid, selection_metric="information_ratio")`。返回 `(stitched_oos_returns, fold_metrics_df, chosen_configs_df, diag)`。`folds` 由 `walk_forward_folds(global_start, global_end, train_months, test_months, step_months)` 构造，使用半开区间且当 `step == test` 时各测试窗互不重叠。
+- **CLI 入口**：`examples/run_walk_forward_hs300.py`。
+  - `--grid-mode none`（默认，向后兼容）：固定一组超参 + IC 权重每折重估，等价于旧脚本。
+  - `--grid-mode default`（**推荐**）：内置 6 组合网格 `top_n ∈ {20, 30, 40}`、`weighting ∈ {equal, score}`、`rebalance = ME`、`weights_source = ic_train`。
+  - `--grid-mode json:PATH`：从 JSON 对象 `{field: [values]}` 读取自定义网格，键必须是 `FactorConfig` / `BacktestConfig` 的字段。
+  - `--selection-metric {information_ratio, sharpe, annual_return}`：训练窗上选 champion 的口径。
+- **输出**：`outputs_walk_forward_hs300/` 下
+  - `oos_stitched_daily_returns.csv`、`oos_stitched_metrics.csv`：拼接 OOS 日收益与整体指标
+  - `oos_deflated_metrics.csv`：基于 Bailey & López de Prado（2012, 2014）的 PSR 与按试验次数 N 的 Bonferroni 折扣 Sharpe / IR（详见 `deflated_metrics.py`）；`N` 自动取 `|grid|`
+  - `walk_forward_fold_metrics.csv`：每折测试窗 metrics + `cfg_*` 列
+  - `walk_forward_chosen_configs.csv`：每折选了什么；**多折之间不稳定** 即提示策略对超参敏感、谨慎对待
+  - `walk_forward_grid_spec.json`：本次跑的网格与切窗参数，便于复现
+- **IC 驱动权重**：每折训练窗内调用 `estimate_factor_weights_ic` 估出 ICIR 权重，应用到该折测试窗的截面打分；不需要也不允许跨折共享 IC 信息。
+
+**对照基线（legacy）**：若需要传统的「train → val → test」三段切分对照（仅作展示，不再作主结论），可用 `examples/run_sensitivity_train_val.py` + `examples/eval_selected_on_test.py` 与 `run_hs300_demo.py --sample-split research`。
+
+**仍未覆盖的偏差**：成分股非 point-in-time（README 上文「股票池偏差」）、基本面字段前视 / 修订滞后、逐笔成交与冲击成本等。
+
+**PowerShell 示例（先 `--limit 5` 冒烟，再跑完整）：**
+
+```powershell
+cd "C:\Users\w4727\Desktop\2027应届量化交易方向\a_share_quant"
+pip install -e ".[data,dev]"
+python -m pytest tests -q
+
+python examples\run_walk_forward_hs300.py --limit 5 --grid-mode default --benchmark 000300.SH --output-dir outputs_walk_forward_smoke
+python examples\run_walk_forward_hs300.py --grid-mode default --benchmark 000300.SH --output-dir outputs_walk_forward_nested
+```
+
+自定义网格示例（保存为 `my_grid.json`）：
+
+```json
+{
+  "top_n": [20, 30],
+  "weighting": ["equal", "score"],
+  "rebalance": ["ME", "W-FRI"]
+}
+```
+
+```powershell
+python examples\run_walk_forward_hs300.py --grid-mode json:my_grid.json --benchmark 000300.SH --output-dir outputs_walk_forward_custom
+```

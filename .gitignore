@@ -7,3 +7,5 @@
 .cursor/plans/回测亏损归因修复_3d6875f7.plan.md
 .cursor/plans/超额收益参数迭代_bf130bbf.plan.md
 量化研究项目规划.docx
+.cursor/plans/nested_rolling_walk-forward_d5ebeacf.plan.md
+.gitignore

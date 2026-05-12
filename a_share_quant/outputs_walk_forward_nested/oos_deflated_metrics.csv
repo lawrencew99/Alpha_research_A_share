@@ -1,0 +1,8 @@
+﻿,value
+n_observations,484.0
+n_trials_adjustment,6.0
+sharpe,1.0791983562247303
+probability_sharpe_ratio_vs_0,1.0
+bonferroni_deflated_sharpe,0.9702685035715402
+information_ratio,0.05955816710223094
+bonferroni_deflated_information_ratio,-0.04937168555095915

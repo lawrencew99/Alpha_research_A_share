@@ -1,4 +1,9 @@
-"""Merge metrics.csv from several output directories into one summary table."""
+"""Merge metrics.csv from several output directories into one summary table.
+
+For research grids that already embed ``window``, ``n_configs_tried``, and
+``rank_in_search``, use ``examples/run_sensitivity_train_val.py`` instead of
+this legacy merge.
+"""
 
 from __future__ import annotations
 
