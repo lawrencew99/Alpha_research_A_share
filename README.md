@@ -1,8 +1,6 @@
 # A Share Multi-Factor Alpha Research and Portfolio Backtesting System
 
-基于 A 股场景的多因子 Alpha 研究与组合回测 Python 工程包，覆盖真实行情读取、复权处理、因子计算、截面标准化、中性化、多因子合成、交易成本回测和报告输出。
-
-当前主流程使用沪深 300 成分股和 AKShare 真实历史日线行情。
+基于 A 股场景的多因子 Alpha 研究与组合回测 Python 工程包，覆盖真实行情读取、复权处理、因子计算、截面标准化、中性化、多因子合成、交易成本回测和报告输出。当前主流程使用沪深 300 成分股和 AKShare 真实历史日线行情。
 
 v0.8 demo已用本地模拟数据跑通全流程。
 
